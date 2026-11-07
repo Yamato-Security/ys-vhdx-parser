@@ -23,7 +23,10 @@ use std::sync::{Arc, Mutex};
 use ys_vhdx_mount::image_mount;
 
 fn sha256(path: &Path) -> String {
-    format!("{:x}", Sha256::digest(fs::read(path).unwrap()))
+    Sha256::digest(fs::read(path).unwrap())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 fn fuse_available() -> bool {

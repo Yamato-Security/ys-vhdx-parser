@@ -877,7 +877,12 @@ mod tests {
                 hash.update(&bytes);
             }
             assert_eq!(offset, size, "{path}");
-            out.push((path, size, format!("{:x}", hash.finalize())));
+            let digest = hash
+                .finalize()
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect();
+            out.push((path, size, digest));
         }
     }
 

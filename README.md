@@ -3,14 +3,17 @@
 Yamato Security's VHDX reader and read-only NTFS/FUSE mounting libraries, used by
 [Juntei](https://github.com/Yamato-Security/juntei).
 
+Both crates are version 1.0.0 and use Rust edition 2024. Building the workspace
+requires Rust 1.88 or newer.
+
 | Crate | Rust library | Purpose | License |
 |---|---|---|---|
 | [`ys-vhdx-parser`](core/) | `vhdx` | VHDX container decoding and a `Read + Seek` virtual disk | Apache-2.0 |
 | [`ys-vhdx-mount`](mount/) | `ys_vhdx_mount` | NTFS volumes, file reads and read-only FUSE mounting | RPL-1.5 |
 
-The reader is imported from Security Ronin's `vhdx-core` 0.4.1, at commit
-`40358d3153c121dcea986a125fa6a8f88853bc1e`. The reader implementation is retained
-unchanged. The mounting layer is moved from Juntei PR #135, including its regression
+The reader is based on Security Ronin's `vhdx-core` 0.4.1, at commit
+`40358d3153c121dcea986a125fa6a8f88853bc1e`, retaining its regression tests and
+attribution. The mounting layer is moved from Juntei PR #135, including its regression
 fixes and public KAPE-layout fixture. See [NOTICE](NOTICE) for attribution and the
 component licenses.
 

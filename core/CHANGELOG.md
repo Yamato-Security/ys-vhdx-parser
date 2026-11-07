@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-11-07
+
+- Adopt shared workspace version 1.0.0 and Rust edition 2024.
+- Update dependencies, including `forensic-vfs` 0.10, and require Rust 1.88 or newer.
+
 ## [0.4.1](https://github.com/SecurityRonin/vhdx-forensic/compare/vhdx-core-v0.4.0...vhdx-core-v0.4.1) - 2026-08-07
 
 ### Fixed

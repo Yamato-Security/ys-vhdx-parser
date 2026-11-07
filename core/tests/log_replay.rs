@@ -1,10 +1,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 use std::io::Read;
 use vhdx::{
+    VhdxReader,
     header::crc32c,
     metadata::{GUID_FILE_PARAMETERS, GUID_LOGICAL_SECTOR_SIZE, GUID_VIRTUAL_DISK_SIZE},
     region::{BAT_GUID, METADATA_GUID},
-    VhdxReader,
 };
 
 // ─── Layout of the synthetic test image ────────────────────────────────────
@@ -44,7 +44,7 @@ fn write_header(slot: &mut [u8], seq: u64, log_guid: [u8; 16], log_off: u64, log
     h[0..4].copy_from_slice(b"head");
     h[4..8].fill(0); // CRC placeholder
     h[8..16].copy_from_slice(&seq.to_le_bytes()); // SequenceNumber
-                                                  // FileWriteGuid [16..32] and DataWriteGuid [32..48] left as zeros (valid).
+    // FileWriteGuid [16..32] and DataWriteGuid [32..48] left as zeros (valid).
     h[48..64].copy_from_slice(&log_guid); // LogGuid
     h[64..66].copy_from_slice(&1u16.to_le_bytes()); // LogVersion
     h[66..68].copy_from_slice(&1u16.to_le_bytes()); // Version
@@ -179,10 +179,10 @@ fn build_dirty_log_vhdx() -> Vec<u8> {
         e[0..4].copy_from_slice(b"loge");
         // e[4..8] CRC = 0 for now (fill after)
         e[8..12].copy_from_slice(&(ENTRY_LEN as u32).to_le_bytes()); // EntryLength
-                                                                     // e[12..16] Tail = 0
+        // e[12..16] Tail = 0
         e[16..24].copy_from_slice(&1u64.to_le_bytes()); // SequenceNumber
         e[24..28].copy_from_slice(&1u32.to_le_bytes()); // DescriptorCount
-                                                        // e[28..32] Reserved
+        // e[28..32] Reserved
         e[32..48].copy_from_slice(&LOG_GUID); // LogGuid
         let file_size = FILE_SIZE as u64;
         e[48..56].copy_from_slice(&file_size.to_le_bytes()); // FlushedFileOffset

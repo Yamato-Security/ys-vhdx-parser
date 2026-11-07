@@ -1,7 +1,7 @@
 use crate::backing::Backing;
 use crate::bytes::{le_arr16, le_u32, le_u64};
 use crate::error::{Result, VhdxError};
-use crate::header::{crc32c, parse_active_header, VhdxHeader};
+use crate::header::{VhdxHeader, crc32c, parse_active_header};
 
 /// Apply a dirty VHDX log to the in-memory buffer before parsing.
 ///

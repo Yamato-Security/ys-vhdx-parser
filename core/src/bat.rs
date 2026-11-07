@@ -87,14 +87,14 @@ impl Bat {
         match state {
             PAYLOAD_BLOCK_NOT_PRESENT => return Ok(ReadTarget::Parent),
             PAYLOAD_BLOCK_UNDEFINED | PAYLOAD_BLOCK_ZERO | PAYLOAD_BLOCK_UNMAPPED => {
-                return Ok(ReadTarget::Zero)
+                return Ok(ReadTarget::Zero);
             }
             PAYLOAD_BLOCK_FULLY_PRESENT | PAYLOAD_BLOCK_PARTIALLY_PRESENT => {}
             _ => {
                 return Err(VhdxError::InvalidPayloadBlockState {
                     block: data_block_index,
                     state: state as u8,
-                })
+                });
             }
         }
 
@@ -142,7 +142,7 @@ impl Bat {
 
 #[cfg(test)]
 mod tests {
-    use super::{Bat, ReadTarget, MIB};
+    use super::{Bat, MIB, ReadTarget};
     use crate::error::VhdxError;
     use crate::metadata::VhdxMetadata;
 

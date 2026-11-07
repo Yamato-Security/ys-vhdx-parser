@@ -1,6 +1,6 @@
 [package]
 name = "ys-vhdx-parser"
-version = "0.4.1"
+version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 description = "Read-only VHDX (Hyper-V) virtual-disk container library for forensic use"
@@ -23,12 +23,12 @@ vfs = ["dep:forensic-vfs"]
 
 [dependencies]
 thiserror = { workspace = true }
-forensic-vfs = { version = "0.3", optional = true }
+forensic-vfs = { version = "0.10.0", optional = true }
 
 [dev-dependencies]
-forensic-testgate = "0.1"
+forensic-testgate = "0.1.0"
 tempfile = { workspace = true }
-forensic-vfs = "0.3"
+forensic-vfs = "0.10.0"
 
 [lints]
 workspace = true

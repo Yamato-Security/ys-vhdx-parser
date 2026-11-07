@@ -2,14 +2,14 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
 
+use crate::FILE_MAGIC;
 use crate::backing::{Backing, ReadSeekSend};
 use crate::bat::{Bat, ReadTarget};
 use crate::error::{Result, VhdxError};
-use crate::header::{parse_active_header, REGION_TABLE1_OFFSET, REGION_TABLE2_OFFSET};
+use crate::header::{REGION_TABLE1_OFFSET, REGION_TABLE2_OFFSET, parse_active_header};
 use crate::log::LogOverlay;
-use crate::metadata::{parse_metadata, VhdxMetadata};
+use crate::metadata::{VhdxMetadata, parse_metadata};
 use crate::region::parse_region_table;
-use crate::FILE_MAGIC;
 
 /// Read-only VHDX container reader.
 ///

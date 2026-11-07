@@ -76,7 +76,10 @@ impl VhdxMetadata {
                 "VirtualDiskSize exceeds the 64 TiB spec limit",
             ));
         }
-        if self.virtual_disk_size % u64::from(self.logical_sector_size) != 0 {
+        if !self
+            .virtual_disk_size
+            .is_multiple_of(u64::from(self.logical_sector_size))
+        {
             return Err(VhdxError::InvalidMetadata(
                 "VirtualDiskSize must be a multiple of LogicalSectorSize",
             ));
