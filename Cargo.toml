@@ -1,0 +1,37 @@
+[workspace]
+members = ["core", "mount"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.85"
+license = "Apache-2.0"
+repository = "https://github.com/Yamato-Security/ys-vhdx-parser"
+
+[workspace.dependencies]
+thiserror = "2"
+tempfile = "3"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+pedantic = { level = "warn", priority = -1 }
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+unwrap_used = { level = "deny", priority = 0 }
+expect_used = { level = "deny", priority = 0 }
+module_name_repetitions = { level = "allow", priority = 1 }
+must_use_candidate = { level = "allow", priority = 1 }
+missing_errors_doc = { level = "allow", priority = 1 }
+missing_panics_doc = { level = "allow", priority = 1 }
+cast_possible_truncation = { level = "allow", priority = 1 }
+cast_possible_wrap = { level = "allow", priority = 1 }
+cast_sign_loss = { level = "allow", priority = 1 }
+cast_precision_loss = { level = "allow", priority = 1 }
+format_push_string = { level = "allow", priority = 1 }
+format_collect = { level = "allow", priority = 1 }
+too_many_lines = { level = "allow", priority = 1 }
+items_after_statements = { level = "allow", priority = 1 }
+similar_names = { level = "allow", priority = 1 }
+manual_let_else = { level = "allow", priority = 1 }

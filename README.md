@@ -1,0 +1,82 @@
+# ys-vhdx-parser
+
+Yamato Security's VHDX reader and read-only NTFS/FUSE mounting libraries, used by
+[Juntei](https://github.com/Yamato-Security/juntei).
+
+| Crate | Rust library | Purpose | License |
+|---|---|---|---|
+| [`ys-vhdx-parser`](core/) | `vhdx` | VHDX container decoding and a `Read + Seek` virtual disk | Apache-2.0 |
+| [`ys-vhdx-mount`](mount/) | `ys_vhdx_mount` | NTFS volumes, file reads and read-only FUSE mounting | RPL-1.5 |
+
+The reader is imported from Security Ronin's `vhdx-core` 0.4.1, at commit
+`40358d3153c121dcea986a125fa6a8f88853bc1e`. The reader implementation is retained
+unchanged. The mounting layer is moved from Juntei PR #135, including its regression
+fixes and public KAPE-layout fixture. See [NOTICE](NOTICE) for attribution and the
+component licenses.
+
+## VHDX reader
+
+The container reader works across platforms, without mounting or privileged access.
+It supports dynamic and fixed VHDX, explicit parent readers for differencing images,
+and dirty-log replay in memory. It does not write to the evidence image.
+
+```toml
+[dependencies]
+vhdx = { package = "ys-vhdx-parser", git = "https://github.com/Yamato-Security/ys-vhdx-parser", branch = "main" }
+```
+
+```rust
+use std::io::Read;
+use vhdx::VhdxReader;
+
+let mut disk = VhdxReader::open("disk.vhdx")?;
+let mut sector = vec![0; disk.logical_sector_size() as usize];
+disk.read_exact(&mut sector)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+## Read-only mounting
+
+`ys-vhdx-mount` provides `image::Image` and `image_mount` APIs. The former discovers
+MBR/GPT NTFS volumes and reads resident, fragmented, sparse and compressed streams;
+the latter serves them through FUSE and exposes explicit unmount handles.
+
+```toml
+[target.'cfg(target_os = "linux")'.dependencies]
+vhdx_mount = { package = "ys-vhdx-mount", git = "https://github.com/Yamato-Security/ys-vhdx-parser", branch = "main" }
+```
+
+Mounting requires Linux, access to `/dev/fuse`, and FUSE 3's `fusermount3` helper.
+The crate does not require libfuse at build time. The image and the FUSE view are
+read-only. Multiple NTFS volumes appear as `Volume1`, `Volume2`, and so on.
+Unreadable NTFS volumes are retained in `Image::problems` for callers to report.
+
+For the command-line interface, use Juntei:
+
+```bash
+mkdir mounted
+juntei mount collection.vhdx mounted
+juntei auto-parse -d collections --vhdx -o parsed
+```
+
+The mounting view uses exact stored names and standard-information timestamps.
+DOS aliases and alternate data streams are not exposed. EFS content is unreadable.
+Compressed content is materialized only on read, up to 1 GiB per file. The content
+cache normally retains at most 64 MiB; a larger accepted file occupies it alone.
+Callers should arrange unmounting on normal completion and interruption; Juntei
+provides that lifecycle around these APIs.
+
+## Validation
+
+```bash
+cargo test --workspace --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo fmt --all -- --check
+```
+
+Reader tests include public dynamic, fixed and differencing images, synthetic log
+replay and malformed-input tests. Optional external-corpus/QEMU tests retain their
+original availability gates. Mount tests include known SHA-256 checks for the
+KAPE-layout files, sparse/fragmented/compressed data, malformed partition tables,
+partial volumes and FILETIME precision. Linux CI requires the live FUSE test;
+Juntei also tests its CLI, automatic parsing and interrupt cleanup against this SDK.

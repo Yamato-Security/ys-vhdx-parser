@@ -1,0 +1,14 @@
+ys-vhdx-parser
+
+The core/ reader is based on Security Ronin's vhdx-core 0.4.1, by Albert Hui,
+from https://github.com/SecurityRonin/vhdx-forensic at commit
+40358d3153c121dcea986a125fa6a8f88853bc1e. The reader source, integration tests,
+public test corpus and original attribution are retained under Apache-2.0.
+See LICENSE, core/LICENSE, and tests/data/SOURCES.md.
+
+The mount/ crate is extracted from Yamato Security Juntei PR #135 at commit
+c613d294f909f3d2fc3c6572e5676ef66919aea3. It is copyright 2026 Shirofune
+Security Co., Ltd. and licensed under RPL-1.5. See mount/LICENSE.
+
+These components retain their own licenses; the Apache-2.0 license of the
+container reader does not relicense the RPL-1.5 mounting implementation.

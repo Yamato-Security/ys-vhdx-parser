@@ -1,0 +1,34 @@
+[package]
+name = "ys-vhdx-parser"
+version = "0.4.1"
+edition.workspace = true
+rust-version.workspace = true
+description = "Read-only VHDX (Hyper-V) virtual-disk container library for forensic use"
+license.workspace = true
+repository.workspace = true
+homepage = "https://github.com/Yamato-Security/ys-vhdx-parser"
+authors = ["Albert Hui", "Yamato Security"]
+keywords = ["forensics", "vhdx", "disk-image", "windows", "hyper-v"]
+categories = ["parser-implementations", "filesystem"]
+readme = "README.md"
+publish = false
+
+[lib]
+name = "vhdx"
+
+[features]
+# Implement the forensic-vfs ImageSource contract so a decoded VHDX composes
+# directly into the fleet VFS. Off by default (optional forensic-vfs dep).
+vfs = ["dep:forensic-vfs"]
+
+[dependencies]
+thiserror = { workspace = true }
+forensic-vfs = { version = "0.3", optional = true }
+
+[dev-dependencies]
+forensic-testgate = "0.1"
+tempfile = { workspace = true }
+forensic-vfs = "0.3"
+
+[lints]
+workspace = true

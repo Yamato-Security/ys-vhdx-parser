@@ -1,0 +1,25 @@
+[package]
+name = "ys-vhdx-mount"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+license = "RPL-1.5"
+repository = "https://github.com/Yamato-Security/ys-vhdx-parser"
+authors = ["Yamato Security"]
+description = "Read-only VHDX NTFS mounting through FUSE, used by Juntei"
+readme = "README.md"
+publish = false
+
+[target.'cfg(target_os = "linux")'.dependencies]
+vhdx = { package = "ys-vhdx-parser", path = "../core" }
+ntfs-core = "0.9.8"
+fuser = "0.18"
+ctrlc = { version = "3.4", features = ["termination"] }
+
+[dev-dependencies]
+flate2 = "1"
+sha2 = "0.10"
+tempfile.workspace = true
+
+[lints.rust]
+unsafe_code = "forbid"
