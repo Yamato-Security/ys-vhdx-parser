@@ -1,4 +1,9 @@
 // Copyright (C) 2026 Shirofune Security Co., Ltd.
+
+// SPDX-License-Identifier: RPL-1.5 OR AGPL-3.0-only
+//
+// You may alternatively use this file under the GNU Affero General Public License,
+// version 3 only; see LICENSE-AGPL-3.0. The following notice applies to the RPL option.
 //
 // Unless explicitly acquired and licensed from Licensor under another license, the contents of this
 // file are subject to the Reciprocal Public License ("RPL") Version 1.5, or subsequent versions as

@@ -2,7 +2,9 @@
 
 Read-only NTFS/FUSE mounting for Yamato Security's [VHDX SDK](../README.md), extracted
 from Juntei PR #135. The API is available on Linux; the container reader in `core/`
-is cross-platform. This crate is licensed under RPL-1.5; see [LICENSE](LICENSE).
+is cross-platform. This crate is dual-licensed under **RPL-1.5 OR AGPL-3.0-only**, at your choice; see
+[LICENSE](LICENSE) and [LICENSE-AGPL-3.0](LICENSE-AGPL-3.0). The AGPL alternative lets
+Hayabusa reuse the same read-only mounting implementation.
 
 - `image::Image::open`: read VHDX and discover NTFS volumes; inspect `problems` for
   any partitions that could not be opened.
