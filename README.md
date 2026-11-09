@@ -9,7 +9,7 @@ requires Rust 1.88 or newer.
 | Crate | Rust library | Purpose | License |
 |---|---|---|---|
 | [`ys-vhdx-parser`](core/) | `vhdx` | VHDX container decoding and a `Read + Seek` virtual disk | Apache-2.0 |
-| [`ys-vhdx-mount`](mount/) | `ys_vhdx_mount` | NTFS volumes, file reads and read-only FUSE mounting | RPL-1.5 |
+| [`ys-vhdx-mount`](mount/) | `ys_vhdx_mount` | NTFS volumes, file reads and read-only FUSE mounting | RPL-1.5 OR AGPL-3.0-only |
 
 The reader is based on Security Ronin's `vhdx-core` 0.4.1, at commit
 `40358d3153c121dcea986a125fa6a8f88853bc1e`, retaining its regression tests and
