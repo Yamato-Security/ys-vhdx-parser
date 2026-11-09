@@ -1,8 +1,8 @@
 # ys-vhdx-mount
 
-Read-only NTFS/FUSE mounting for Yamato Security's [VHDX SDK](../README.md), extracted
-from Juntei PR #135. The API is available on Linux; the container reader in `core/`
-is cross-platform. This crate is dual-licensed under **RPL-1.5 OR AGPL-3.0-only**, at your choice; see
+Cross-platform read-only NTFS image access and Linux FUSE mounting for Yamato Security's [VHDX SDK](../README.md), extracted
+from Juntei PR #135. `image::Image` and its file readers are available on Linux, macOS, and Windows.
+Only the FUSE mounting API requires Linux. This crate is dual-licensed under **RPL-1.5 OR AGPL-3.0-only**, at your choice; see
 [LICENSE](LICENSE) and [LICENSE-AGPL-3.0](LICENSE-AGPL-3.0). The AGPL alternative lets
 Hayabusa reuse the same read-only mounting implementation.
 
@@ -12,6 +12,7 @@ Hayabusa reuse the same read-only mounting implementation.
   container (an E01 image, for example), given as any `Read + Seek + Send`. Logical
   sector sizes are powers of two from 512 through 4096 bytes; smaller supplied values
   retain the default of 512 bytes. Invalid geometry returns an error.
+- `image::Image::file_reader`: open a seekable, read-only stream without mounting or extracting a file.
 - `image::Volume`: enumerate files, read standard-information timestamps and serve
   arbitrary-offset resident, fragmented, sparse and compressed content.
 - `image_mount::new_session`: construct a read-only FUSE session.
@@ -20,7 +21,7 @@ Hayabusa reuse the same read-only mounting implementation.
 - `Mounted::unmount`: unmount and join the worker threads; dropping it also unmounts.
 - `image_mount::unmount_on_interrupt`: opt in to a process-wide signal handler.
 
-FUSE 3 and `/dev/fuse` are required for mounting. Do not install multiple process-wide
+FUSE 3 and `/dev/fuse` are required only for mounting; direct image and NTFS file reads need no driver, mount helper, or administrator privileges. Do not install multiple process-wide
 interrupt handlers. Mount creation and registration are synchronized with the handler;
 registered handles remain usable after the worker starts. `Mounted::unmount` also works
 when a callback has already detached the image. The CLI and orchestration remain in Juntei.

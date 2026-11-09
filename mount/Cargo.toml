@@ -6,13 +6,14 @@ rust-version.workspace = true
 license = "RPL-1.5 OR AGPL-3.0-only"
 repository = "https://github.com/Yamato-Security/ys-vhdx-parser"
 authors = ["Yamato Security"]
-description = "Read-only VHDX NTFS mounting through FUSE, used by Juntei"
+description = "Cross-platform read-only NTFS image access and Linux FUSE mounting"
 readme = "README.md"
 publish = false
 
-[target.'cfg(target_os = "linux")'.dependencies]
+[dependencies]
 vhdx = { package = "ys-vhdx-parser", version = "1.0.0", path = "../core" }
 ntfs-core = "0.9.8"
+[target.'cfg(target_os = "linux")'.dependencies]
 fuser = "0.18"
 ctrlc = { version = "3.5.2", features = ["termination"] }
 

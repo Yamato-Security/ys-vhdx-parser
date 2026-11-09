@@ -175,6 +175,87 @@ impl Image {
     }
 }
 
+/// A seekable, read-only NTFS file. Reads only the requested ranges; opening a file does
+/// not extract it or allocate a buffer proportional to its size.
+pub struct FileReader {
+    image: Arc<Image>,
+    volume: usize,
+    record: u64,
+    size: u64,
+    position: u64,
+}
+
+impl Image {
+    /// Open a file in a volume for streaming reads, keeping the image alive for the reader.
+    ///
+    /// # Errors
+    /// When the volume index or record is invalid, or the record is a directory.
+    pub fn file_reader(self: &Arc<Self>, volume: usize, record: u64) -> io::Result<FileReader> {
+        let selected = self.volumes.get(volume).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidInput, "volume index out of range")
+        })?;
+        let stat = selected.stat(record)?;
+        if stat.directory {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot read a directory as a file",
+            ));
+        }
+        Ok(FileReader {
+            image: self.clone(),
+            volume,
+            record,
+            size: stat.size,
+            position: 0,
+        })
+    }
+}
+
+impl FileReader {
+    /// The file's unnamed data-stream length in bytes.
+    pub fn len(&self) -> u64 {
+        self.size
+    }
+    pub fn is_empty(&self) -> bool {
+        self.size == 0
+    }
+}
+
+impl Read for FileReader {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let remaining = self.size.saturating_sub(self.position);
+        let count = usize::try_from(remaining)
+            .unwrap_or(usize::MAX)
+            .min(buf.len());
+        if count == 0 {
+            return Ok(0);
+        }
+        let data = self.image.volumes[self.volume].read(self.record, self.position, count)?;
+        if data.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "NTFS stream ended before its declared length",
+            ));
+        }
+        buf[..data.len()].copy_from_slice(&data);
+        self.position += data.len() as u64;
+        Ok(data.len())
+    }
+}
+
+impl Seek for FileReader {
+    fn seek(&mut self, to: SeekFrom) -> io::Result<u64> {
+        let position = match to {
+            SeekFrom::Start(pos) => Some(pos),
+            SeekFrom::Current(delta) => self.position.checked_add_signed(delta),
+            SeekFrom::End(delta) => self.size.checked_add_signed(delta),
+        }
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "invalid NTFS file seek"))?;
+        self.position = position;
+        Ok(position)
+    }
+}
+
 /// A directory entry.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Entry {

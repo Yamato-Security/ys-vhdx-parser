@@ -40,9 +40,10 @@ disk.read_exact(&mut sector)?;
 
 ## Read-only mounting
 
-`ys-vhdx-mount` provides `image::Image` and `image_mount` APIs. The former discovers
+`ys-vhdx-mount` provides `image::Image` and `image_mount` APIs. The former works on Linux, macOS, and Windows, and discovers
 MBR/GPT NTFS volumes and reads resident, fragmented, sparse and compressed streams;
-the latter serves them through FUSE and exposes explicit unmount handles. Besides VHDX
+`Image::file_reader` provides streaming `Read + Seek` access without mounting or extracting.
+The mounting API serves them through FUSE on Linux and exposes explicit unmount handles. Besides VHDX
 files (`Image::open`), `Image::from_disk` takes the disk of any other container that the
 caller reads (an E01 image, for example) and `image_mount::mount_image` mounts it.
 
