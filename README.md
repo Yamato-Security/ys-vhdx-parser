@@ -38,6 +38,37 @@ disk.read_exact(&mut sector)?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
+## Native NTFS reads on Linux, macOS, and Windows
+
+The `image` API opens NTFS volumes and file streams directly, without a mounting driver,
+FUSE, administrator privileges, or temporary extraction. Add the dependency on every
+platform:
+
+```toml
+[dependencies]
+ys_vhdx_mount = { package = "ys-vhdx-mount", git = "https://github.com/Yamato-Security/ys-vhdx-parser", branch = "main" }
+```
+
+For a `Security.evtx` at the volume root (use `Volume::lookup` to traverse directories):
+
+```rust
+use std::io::Read;
+use std::sync::Arc;
+use ys_vhdx_mount::image::{Image, ROOT_RECORD};
+
+let image = Arc::new(Image::open("disk.vhdx")?);
+let entry = image.volumes[0].lookup(ROOT_RECORD, "Security.evtx")?
+    .ok_or("Security.evtx not found")?;
+let mut file = image.file_reader(0, entry.record)?;
+let mut signature = [0; 8];
+file.read_exact(&mut signature)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The stream implements `Read + Seek`, retains the image while open, and has an independent
+position. Opening it does not load the file contents; reads use the existing NTFS
+resident, fragmented, sparse, and compressed-data handling.
+
 ## Read-only mounting
 
 `ys-vhdx-mount` provides `image::Image` and `image_mount` APIs. The former works on Linux, macOS, and Windows, and discovers
