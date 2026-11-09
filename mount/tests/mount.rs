@@ -102,7 +102,13 @@ fn mount_reads_known_content_refuses_writes_and_preserves_image() {
             .is_err()
     );
     assert!(fs::remove_file(data.join("small.txt")).is_err());
+    unmounters.lock().unwrap()[0].unmount().unwrap();
+    let callback_detached = !data.exists();
     mounted.unmount().unwrap();
+    assert!(
+        callback_detached,
+        "registered unmount handle did not detach the image"
+    );
     assert!(
         !data.exists(),
         "the FUSE view must disappear after unmounting"

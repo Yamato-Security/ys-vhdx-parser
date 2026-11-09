@@ -130,12 +130,18 @@ impl Image {
 
     /// Every NTFS volume of a disk of `size` bytes with sectors of `sector_size` bytes (512 if
     /// smaller), whatever container holds it: its bytes are read from `disk`, which is never
-    /// written to.
+    /// written to. The effective sector size must be a power of two from 512 through 4096.
     ///
     /// # Errors
-    /// When the disk can't be read, or holds no NTFS volume.
+    /// When the sector size is invalid, the disk can't be read, or it holds no NTFS volume.
     pub fn from_disk(disk: Box<dyn DiskReader>, size: u64, sector_size: u64) -> io::Result<Image> {
         let sector = sector_size.max(512);
+        if sector > 4096 || !sector.is_power_of_two() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "sector size must be 512, 1024, 2048, or 4096 bytes (values below 512 use 512)",
+            ));
+        }
         let disk: Disk = Arc::new(Mutex::new(disk));
         let mut volumes = Vec::new();
         let mut problems = Vec::new();
@@ -575,7 +581,9 @@ fn ntfs_partitions(disk: &Disk, size: u64, sector: u64) -> io::Result<Vec<(u64, 
                 if matches!(kind, 0x05 | 0x0F | 0x85) {
                     candidates.extend(extended_partitions(&mut reader, lba, sector)?);
                 } else if kind != 0 {
-                    candidates.push((lba * sector, sectors * sector));
+                    let start = sector_bytes(lba, sector)?;
+                    let len = sector_bytes(sectors, sector)?;
+                    candidates.push((start, len));
                 }
             }
         }
@@ -602,6 +610,12 @@ fn mbr_entries(mbr: &[u8]) -> Vec<(u8, u64, u64)> {
         .collect()
 }
 
+fn sector_bytes(sectors: u64, sector: u64) -> io::Result<u64> {
+    sectors
+        .checked_mul(sector)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "partition byte range overflows"))
+}
+
 /// The logical partitions of the extended partition at LBA `base`, following its chain of EBRs
 /// (at most 128).
 fn extended_partitions<R: Read + Seek>(
@@ -619,7 +633,8 @@ fn extended_partitions<R: Read + Seek>(
                 "cyclic extended partition chain",
             ));
         }
-        let Ok(bytes) = read_at(reader, ebr * sector, 512) else {
+        let offset = sector_bytes(ebr, sector)?;
+        let Ok(bytes) = read_at(reader, offset, 512) else {
             return Ok(out);
         };
         if bytes.get(510..512) != Some(&[0x55, 0xAA]) {
@@ -628,13 +643,21 @@ fn extended_partitions<R: Read + Seek>(
         let entries = mbr_entries(&bytes);
         let (kind, lba, sectors) = entries[0];
         if kind != 0 {
-            out.push(((ebr + lba) * sector, sectors * sector));
+            let start = ebr.checked_add(lba).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "partition LBA overflows")
+            })?;
+            out.push((sector_bytes(start, sector)?, sector_bytes(sectors, sector)?));
         }
         let (next_kind, next_lba, _) = entries[1];
         if next_kind == 0 || next_lba == 0 {
             return Ok(out);
         }
-        ebr = base + next_lba;
+        ebr = base.checked_add(next_lba).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "extended partition LBA overflows",
+            )
+        })?;
     }
     Err(io::Error::new(
         io::ErrorKind::InvalidData,

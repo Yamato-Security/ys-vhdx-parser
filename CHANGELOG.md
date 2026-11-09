@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Reject invalid logical sector sizes in `Image::from_disk` and check MBR/EBR byte-range
+  arithmetic so malformed geometry returns an error instead of panicking or wrapping.
+- Keep FUSE mount ownership shared with registered unmount handles instead of moving it
+  into `BackgroundSession`. Interrupt callbacks now actually detach mounted images;
+  mount creation/registration is serialized with interrupt cleanup and process exit.
+
 - `ys-vhdx-mount`: `image::Image::from_disk` opens the NTFS volumes of a disk that the caller
   reads from any other container (any `Read + Seek + Send`), such as an E01 image, and
   `image_mount::mount_image` mounts an opened image. A disk that is a single NTFS volume
