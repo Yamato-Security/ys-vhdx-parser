@@ -1,5 +1,12 @@
 # Changes
 
+## Unreleased
+
+- `ys-vhdx-mount`: `image::Image::from_disk` opens the NTFS volumes of a disk that the caller
+  reads from any other container (any `Read + Seek + Send`), such as an E01 image, and
+  `image_mount::mount_image` mounts an opened image. A disk that is a single NTFS volume
+  without a partition table is one volume, as for VHDX. (Juntei #140)
+
 ## 1.0.0 - 2026-11-07
 
 - Version both `ys-vhdx-parser` and `ys-vhdx-mount` as 1.0.0 through shared workspace metadata.

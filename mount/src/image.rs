@@ -11,12 +11,14 @@
 // PURPOSE, QUIET ENJOYMENT, OR NON-INFRINGEMENT. See the RPL for specific language governing rights
 // and limitations under the RPL.
 
-//! Read-only access to the NTFS volumes inside a VHDX disk image: KAPE's `--vhdx` collections and
-//! Hyper-V disks. The container is read with vhdx-core (dynamic, fixed and differencing disks, a
-//! pending log replayed in memory), the volumes are found from the MBR or GPT, and each NTFS
-//! volume's directories and files are read with ntfs-core, which also accepts the boot sectors
-//! that DiscUtils writes for KAPE (jump instruction and `55 AA` signature zeroed). Nothing is
-//! written to the image: `juntei mount` and `auto-parse --vhdx` serve these files through FUSE.
+//! Read-only access to the NTFS volumes of a disk image: a VHDX (a triage collection's or a Hyper-V
+//! disk), read with this repository's VHDX reader (dynamic, fixed and differencing disks, a
+//! pending log replayed in memory), or the disk of any other container a caller reads
+//! ([`Image::from_disk`]), such as an E01 image. The volumes are found from the MBR or GPT (or the
+//! whole disk is one volume), and each NTFS volume's directories and files are read with
+//! ntfs-core, which also accepts the boot sectors that DiscUtils writes (jump instruction and
+//! `55 AA` signature zeroed). Nothing is written to the image: `juntei mount` and `auto-parse`
+//! serve these files through FUSE.
 
 use ntfs_core::{AttributeBody, Filetime, MftRecordHeader, NtfsFs, Run, StandardInformation};
 use std::collections::{HashMap, HashSet};
@@ -46,8 +48,13 @@ const LAYOUT_CACHE: usize = 4096;
 /// A single larger file may occupy the cache alone, up to MAX_DECOMPRESSED.
 const COMPRESSED_CACHE_BYTES: u64 = 64 << 20;
 
+/// The bytes of a disk, from whatever container holds them: what [`Image::from_disk`] takes.
+pub trait DiskReader: Read + Seek + Send {}
+
+impl<T: Read + Seek + Send> DiskReader for T {}
+
 /// The disk of an image, shared by its volumes.
-type Disk = Arc<Mutex<vhdx::VhdxReader>>;
+type Disk = Arc<Mutex<Box<dyn DiskReader>>>;
 
 /// `len` bytes of the disk from `start`: one volume.
 struct Window {
@@ -117,8 +124,19 @@ impl Image {
         let reader = vhdx::VhdxReader::open(path)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
         let size = reader.virtual_disk_size();
-        let sector = u64::from(reader.logical_sector_size()).max(512);
-        let disk: Disk = Arc::new(Mutex::new(reader));
+        let sector = u64::from(reader.logical_sector_size());
+        Image::from_disk(Box::new(reader), size, sector)
+    }
+
+    /// Every NTFS volume of a disk of `size` bytes with sectors of `sector_size` bytes (512 if
+    /// smaller), whatever container holds it: its bytes are read from `disk`, which is never
+    /// written to.
+    ///
+    /// # Errors
+    /// When the disk can't be read, or holds no NTFS volume.
+    pub fn from_disk(disk: Box<dyn DiskReader>, size: u64, sector_size: u64) -> io::Result<Image> {
+        let sector = sector_size.max(512);
+        let disk: Disk = Arc::new(Mutex::new(disk));
         let mut volumes = Vec::new();
         let mut problems = Vec::new();
         for (index, (start, len)) in ntfs_partitions(&disk, size, sector)?

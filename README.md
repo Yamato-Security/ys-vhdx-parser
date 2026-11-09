@@ -42,7 +42,9 @@ disk.read_exact(&mut sector)?;
 
 `ys-vhdx-mount` provides `image::Image` and `image_mount` APIs. The former discovers
 MBR/GPT NTFS volumes and reads resident, fragmented, sparse and compressed streams;
-the latter serves them through FUSE and exposes explicit unmount handles.
+the latter serves them through FUSE and exposes explicit unmount handles. Besides VHDX
+files (`Image::open`), `Image::from_disk` takes the disk of any other container that the
+caller reads (an E01 image, for example) and `image_mount::mount_image` mounts it.
 
 ```toml
 [target.'cfg(target_os = "linux")'.dependencies]

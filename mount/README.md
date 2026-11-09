@@ -6,10 +6,13 @@ is cross-platform. This crate is licensed under RPL-1.5; see [LICENSE](LICENSE).
 
 - `image::Image::open`: read VHDX and discover NTFS volumes; inspect `problems` for
   any partitions that could not be opened.
+- `image::Image::from_disk`: the same for a disk that the caller reads from another
+  container (an E01 image, for example), given as any `Read + Seek + Send`.
 - `image::Volume`: enumerate files, read standard-information timestamps and serve
   arbitrary-offset resident, fragmented, sparse and compressed content.
 - `image_mount::new_session`: construct a read-only FUSE session.
 - `image_mount::mount`: start a background mount, returned as `Mounted`.
+- `image_mount::mount_image`: the same for an `Image` opened with `from_disk`.
 - `Mounted::unmount`: unmount and join the worker threads; dropping it also unmounts.
 - `image_mount::unmount_on_interrupt`: opt in to a process-wide signal handler.
 

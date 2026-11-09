@@ -345,10 +345,23 @@ pub fn mount(
     mount_point: &Path,
     unmounters: &Arc<Mutex<Vec<SessionUnmounter>>>,
 ) -> io::Result<Mounted> {
-    let opened = Image::open(image)?;
+    mount_image(Image::open(image)?, image, mount_point, unmounters)
+}
+
+/// Mount an opened image's NTFS volumes read-only at `mount_point`, as [`mount`] does: for disks
+/// that [`Image::from_disk`] opened. `path` is the image's file, which names the file system.
+///
+/// # Errors
+/// When FUSE can't mount it.
+pub fn mount_image(
+    opened: Image,
+    path: &Path,
+    mount_point: &Path,
+    unmounters: &Arc<Mutex<Vec<SessionUnmounter>>>,
+) -> io::Result<Mounted> {
     let volumes = opened.volumes.iter().map(|v| (v.start, v.len)).collect();
     let problems = opened.problems.clone();
-    let session = new_session(opened, image, mount_point)?;
+    let session = new_session(opened, path, mount_point)?;
     let mut session = session;
     if let Ok(mut list) = unmounters.lock() {
         list.push(session.unmount_callable());
