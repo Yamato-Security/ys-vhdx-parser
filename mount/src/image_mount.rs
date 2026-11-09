@@ -33,6 +33,7 @@ use std::io;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::thread::{self, JoinHandle};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 /// The content never changes: the kernel may keep names and attributes this long.
@@ -316,7 +317,22 @@ pub struct Mounted {
     /// The volumes: (start on the disk, length) in bytes.
     pub volumes: Vec<(u64, u64)>,
     pub problems: Vec<String>,
-    session: Option<fuser::BackgroundSession>,
+    session: Option<MountedSession>,
+}
+
+/// Keep the session's mount ownership shared with every registered unmount handle.
+struct MountedSession {
+    unmounter: SessionUnmounter,
+    worker: JoinHandle<io::Result<()>>,
+}
+
+impl MountedSession {
+    fn unmount_and_join(mut self) -> io::Result<()> {
+        self.unmounter.unmount()?;
+        self.worker
+            .join()
+            .map_err(|_| io::Error::other("filesystem background thread panicked"))?
+    }
 }
 
 impl Mounted {
@@ -326,7 +342,7 @@ impl Mounted {
     /// When it can't be unmounted (a file is still in use).
     pub fn unmount(mut self) -> io::Result<()> {
         match self.session.take() {
-            Some(session) => session.umount_and_join(),
+            Some(session) => session.unmount_and_join(),
             None => Ok(()),
         }
     }
@@ -335,7 +351,7 @@ impl Mounted {
 impl Drop for Mounted {
     fn drop(&mut self) {
         if let Some(session) = self.session.take() {
-            let _ = session.umount_and_join();
+            let _ = session.unmount_and_join();
         }
     }
 }
@@ -350,15 +366,38 @@ pub fn mount(
     mount_point: &Path,
     unmounters: &Arc<Mutex<Vec<SessionUnmounter>>>,
 ) -> io::Result<Mounted> {
-    let opened = Image::open(image)?;
+    mount_image(Image::open(image)?, image, mount_point, unmounters)
+}
+
+/// Mount an opened image's NTFS volumes read-only at `mount_point`, as [`mount`] does: for disks
+/// that [`Image::from_disk`] opened. `path` is the image's file, which names the file system.
+///
+/// # Errors
+/// When FUSE can't mount it.
+pub fn mount_image(
+    opened: Image,
+    path: &Path,
+    mount_point: &Path,
+    unmounters: &Arc<Mutex<Vec<SessionUnmounter>>>,
+) -> io::Result<Mounted> {
+    // Serialize mount creation and registration with the interrupt handler. Otherwise
+    // an interrupt could exit after the mount is attached but before its handle is listed.
+    let mut list = unmounters
+        .lock()
+        .map_err(|_| io::Error::other("mount registry lock poisoned"))?;
     let volumes = opened.volumes.iter().map(|v| (v.start, v.len)).collect();
     let problems = opened.problems.clone();
-    let session = new_session(opened, image, mount_point)?;
+    let session = new_session(opened, path, mount_point)?;
     let mut session = session;
-    if let Ok(mut list) = unmounters.lock() {
-        list.push(session.unmount_callable());
-    }
-    let session = session.spawn()?;
+    let unmounter = session.unmount_callable();
+    let registered = session.unmount_callable();
+    // fuser::Session::spawn moves the mount out of the shared handle, making earlier
+    // SessionUnmounters no-ops. Run the session ourselves to retain shared ownership.
+    let worker = thread::Builder::new()
+        .name("ys-vhdx-fuse".to_string())
+        .spawn(move || session.run())?;
+    list.push(registered);
+    let session = MountedSession { unmounter, worker };
     Ok(Mounted {
         mount_point: mount_point.to_path_buf(),
         volumes,
@@ -413,9 +452,12 @@ pub fn unmount_on_interrupt(
     code: Option<i32>,
 ) -> io::Result<()> {
     ctrlc::set_handler(move || {
-        if let Ok(mut list) = unmounters.lock() {
-            for unmounter in list.iter_mut() {
-                let _ = unmounter.unmount();
+        // Retain the registry lock through process exit: a waiting mount must not
+        // attach a new image after this handler has finished walking the list.
+        let mut list = unmounters.lock().unwrap_or_else(|e| e.into_inner());
+        for unmounter in list.iter_mut() {
+            if let Err(e) = unmounter.unmount() {
+                eprintln!("Could not unmount an image after interruption: {e}");
             }
         }
         if let Some(directory) = &mount_points {

@@ -16,12 +16,14 @@
 // PURPOSE, QUIET ENJOYMENT, OR NON-INFRINGEMENT. See the RPL for specific language governing rights
 // and limitations under the RPL.
 
-//! Read-only access to the NTFS volumes inside a VHDX disk image: KAPE's `--vhdx` collections and
-//! Hyper-V disks. The container is read with vhdx-core (dynamic, fixed and differencing disks, a
-//! pending log replayed in memory), the volumes are found from the MBR or GPT, and each NTFS
-//! volume's directories and files are read with ntfs-core, which also accepts the boot sectors
-//! that DiscUtils writes for KAPE (jump instruction and `55 AA` signature zeroed). Nothing is
-//! written to the image: `juntei mount` and `auto-parse --vhdx` serve these files through FUSE.
+//! Read-only access to the NTFS volumes of a disk image: a VHDX (a triage collection's or a Hyper-V
+//! disk), read with this repository's VHDX reader (dynamic, fixed and differencing disks, a
+//! pending log replayed in memory), or the disk of any other container a caller reads
+//! ([`Image::from_disk`]), such as an E01 image. The volumes are found from the MBR or GPT (or the
+//! whole disk is one volume), and each NTFS volume's directories and files are read with
+//! ntfs-core, which also accepts the boot sectors that DiscUtils writes (jump instruction and
+//! `55 AA` signature zeroed). Nothing is written to the image: `juntei mount` and `auto-parse`
+//! serve these files through FUSE.
 
 use ntfs_core::{AttributeBody, Filetime, MftRecordHeader, NtfsFs, Run, StandardInformation};
 use std::collections::{HashMap, HashSet};
@@ -51,8 +53,13 @@ const LAYOUT_CACHE: usize = 4096;
 /// A single larger file may occupy the cache alone, up to MAX_DECOMPRESSED.
 const COMPRESSED_CACHE_BYTES: u64 = 64 << 20;
 
+/// The bytes of a disk, from whatever container holds them: what [`Image::from_disk`] takes.
+pub trait DiskReader: Read + Seek + Send {}
+
+impl<T: Read + Seek + Send> DiskReader for T {}
+
 /// The disk of an image, shared by its volumes.
-type Disk = Arc<Mutex<vhdx::VhdxReader>>;
+type Disk = Arc<Mutex<Box<dyn DiskReader>>>;
 
 /// `len` bytes of the disk from `start`: one volume.
 struct Window {
@@ -122,8 +129,25 @@ impl Image {
         let reader = vhdx::VhdxReader::open(path)
             .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
         let size = reader.virtual_disk_size();
-        let sector = u64::from(reader.logical_sector_size()).max(512);
-        let disk: Disk = Arc::new(Mutex::new(reader));
+        let sector = u64::from(reader.logical_sector_size());
+        Image::from_disk(Box::new(reader), size, sector)
+    }
+
+    /// Every NTFS volume of a disk of `size` bytes with sectors of `sector_size` bytes (512 if
+    /// smaller), whatever container holds it: its bytes are read from `disk`, which is never
+    /// written to. The effective sector size must be a power of two from 512 through 4096.
+    ///
+    /// # Errors
+    /// When the sector size is invalid, the disk can't be read, or it holds no NTFS volume.
+    pub fn from_disk(disk: Box<dyn DiskReader>, size: u64, sector_size: u64) -> io::Result<Image> {
+        let sector = sector_size.max(512);
+        if sector > 4096 || !sector.is_power_of_two() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "sector size must be 512, 1024, 2048, or 4096 bytes (values below 512 use 512)",
+            ));
+        }
+        let disk: Disk = Arc::new(Mutex::new(disk));
         let mut volumes = Vec::new();
         let mut problems = Vec::new();
         for (index, (start, len)) in ntfs_partitions(&disk, size, sector)?
@@ -562,7 +586,9 @@ fn ntfs_partitions(disk: &Disk, size: u64, sector: u64) -> io::Result<Vec<(u64, 
                 if matches!(kind, 0x05 | 0x0F | 0x85) {
                     candidates.extend(extended_partitions(&mut reader, lba, sector)?);
                 } else if kind != 0 {
-                    candidates.push((lba * sector, sectors * sector));
+                    let start = sector_bytes(lba, sector)?;
+                    let len = sector_bytes(sectors, sector)?;
+                    candidates.push((start, len));
                 }
             }
         }
@@ -589,6 +615,12 @@ fn mbr_entries(mbr: &[u8]) -> Vec<(u8, u64, u64)> {
         .collect()
 }
 
+fn sector_bytes(sectors: u64, sector: u64) -> io::Result<u64> {
+    sectors
+        .checked_mul(sector)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "partition byte range overflows"))
+}
+
 /// The logical partitions of the extended partition at LBA `base`, following its chain of EBRs
 /// (at most 128).
 fn extended_partitions<R: Read + Seek>(
@@ -606,7 +638,8 @@ fn extended_partitions<R: Read + Seek>(
                 "cyclic extended partition chain",
             ));
         }
-        let Ok(bytes) = read_at(reader, ebr * sector, 512) else {
+        let offset = sector_bytes(ebr, sector)?;
+        let Ok(bytes) = read_at(reader, offset, 512) else {
             return Ok(out);
         };
         if bytes.get(510..512) != Some(&[0x55, 0xAA]) {
@@ -615,13 +648,21 @@ fn extended_partitions<R: Read + Seek>(
         let entries = mbr_entries(&bytes);
         let (kind, lba, sectors) = entries[0];
         if kind != 0 {
-            out.push(((ebr + lba) * sector, sectors * sector));
+            let start = ebr.checked_add(lba).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "partition LBA overflows")
+            })?;
+            out.push((sector_bytes(start, sector)?, sector_bytes(sectors, sector)?));
         }
         let (next_kind, next_lba, _) = entries[1];
         if next_kind == 0 || next_lba == 0 {
             return Ok(out);
         }
-        ebr = base + next_lba;
+        ebr = base.checked_add(next_lba).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "extended partition LBA overflows",
+            )
+        })?;
     }
     Err(io::Error::new(
         io::ErrorKind::InvalidData,
