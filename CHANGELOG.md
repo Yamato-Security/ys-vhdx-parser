@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Make `ys-vhdx-mount::image` available on Linux, macOS, and Windows, including NTFS
+  traversal and seekable `Image::file_reader` streams. Direct reads require no FUSE
+  driver, mount helper, administrator privileges, or temporary extraction. Linux
+  FUSE mounting remains available through `image_mount`.
+
 - Reject invalid logical sector sizes in `Image::from_disk` and check MBR/EBR byte-range
   arithmetic so malformed geometry returns an error instead of panicking or wrapping.
 - Keep FUSE mount ownership shared with registered unmount handles instead of moving it

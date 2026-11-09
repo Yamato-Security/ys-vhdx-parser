@@ -16,9 +16,8 @@
 // PURPOSE, QUIET ENJOYMENT, OR NON-INFRINGEMENT. See the RPL for specific language governing rights
 // and limitations under the RPL.
 
-//! Read-only disk-image mounting for Juntei. The mounting API requires Linux and FUSE 3.
+//! Cross-platform read-only NTFS image access. FUSE mounting additionally requires Linux.
 
-#[cfg(target_os = "linux")]
 pub mod image;
 #[cfg(target_os = "linux")]
 pub mod image_mount;

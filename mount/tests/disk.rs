@@ -19,8 +19,6 @@
 //! A disk read by the caller (`Image::from_disk`): the whole disk with its partition table, and a
 //! single volume without one, read as the VHDX itself is.
 
-#![cfg(target_os = "linux")]
-
 use std::fs;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -98,4 +96,89 @@ fn a_disk_without_ntfs_is_refused() {
         .err()
         .unwrap();
     assert_eq!(error.to_string(), "no NTFS volume found");
+}
+
+#[test]
+fn file_readers_stream_and_seek_each_ntfs_storage_layout() {
+    use std::io::{Seek, SeekFrom};
+    use std::sync::Arc;
+    let directory = tempfile::tempdir().unwrap();
+    let path = sample(directory.path());
+    let original = fs::read(&path).unwrap();
+    let image = Arc::new(Image::open(&path).unwrap());
+    for file in [
+        "small.txt",
+        "fragmented.bin",
+        "sparse.bin",
+        "compressed/text.log",
+    ] {
+        let name = format!("C/Users/sample/Data/{file}");
+        let expected = read_file(&image.volumes[0], &name);
+        let mut record = ROOT_RECORD;
+        for part in name.split('/') {
+            record = image.volumes[0]
+                .lookup(record, part)
+                .unwrap()
+                .unwrap()
+                .record;
+        }
+        let mut stream = image.file_reader(0, record).unwrap();
+        let mut model = Cursor::new(expected.clone());
+        assert_eq!(stream.len(), expected.len() as u64);
+        for (seek, length) in [
+            (SeekFrom::Start(0), 4096),
+            (SeekFrom::Start(7), 17),
+            (SeekFrom::End(-5), 16),
+            (SeekFrom::Current(-2), 2),
+            (SeekFrom::Start(stream.len() + 10), 100),
+        ] {
+            assert_eq!(stream.seek(seek).unwrap(), model.seek(seek).unwrap());
+            let mut actual = vec![0; length];
+            let mut wanted = vec![0; length];
+            let got = stream.read(&mut actual).unwrap();
+            let want = model.read(&mut wanted).unwrap();
+            assert_eq!(got, want, "{file}");
+            assert_eq!(&actual[..got], &wanted[..want], "{file}");
+        }
+        assert!(
+            stream
+                .seek(SeekFrom::End(-((stream.len() as i64) + 1)))
+                .is_err()
+        );
+        stream.rewind().unwrap();
+        let mut all = Vec::new();
+        stream.read_to_end(&mut all).unwrap();
+        assert_eq!(all, expected, "{file}");
+    }
+    assert!(image.file_reader(usize::MAX, ROOT_RECORD).is_err());
+    assert!(image.file_reader(0, ROOT_RECORD).is_err());
+    assert_eq!(original, fs::read(&path).unwrap());
+}
+
+#[test]
+fn independent_readers_keep_the_image_alive_and_are_sendable() {
+    use std::sync::Arc;
+    let directory = tempfile::tempdir().unwrap();
+    let path = sample(directory.path());
+    let image = Arc::new(Image::open(&path).unwrap());
+    let mut record = ROOT_RECORD;
+    for part in "C/Users/sample/Data/small.txt".split('/') {
+        record = image.volumes[0]
+            .lookup(record, part)
+            .unwrap()
+            .unwrap()
+            .record;
+    }
+    let mut first = image.file_reader(0, record).unwrap();
+    let mut second = image.file_reader(0, record).unwrap();
+    drop(image);
+    let worker = std::thread::spawn(move || {
+        let mut data = Vec::new();
+        first.read_to_end(&mut data).unwrap();
+        data
+    });
+    let mut data = Vec::new();
+    second.read_to_end(&mut data).unwrap();
+    assert_eq!(data, b"resident content\n");
+    assert_eq!(worker.join().unwrap(), data);
 }
