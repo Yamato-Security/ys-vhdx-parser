@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `ys-vhdx-mount`: list every entry of a directory whose `$INDEX_ALLOCATION` is in MFT extension
+  records named by its `$ATTRIBUTE_LIST`, in one or more pieces, as Windows stores the index of a
+  large or often changed directory. Such directories listed only their `$INDEX_ROOT` entries,
+  without an error: on a public Windows XP image, `WINDOWS\system32` showed 2 of its 1,976
+  entries. An index that can't be read whole is now an error rather than a shorter listing.
+  (Juntei #160)
+
 - Make `ys-vhdx-mount::image` available on Linux, macOS, and Windows, including NTFS
   traversal and seekable `Image::file_reader` streams. Direct reads require no FUSE
   driver, mount helper, administrator privileges, or temporary extraction. Linux

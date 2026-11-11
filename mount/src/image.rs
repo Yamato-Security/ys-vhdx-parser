@@ -25,7 +25,10 @@
 //! `55 AA` signature zeroed). Nothing is written to the image: `juntei mount` and `auto-parse`
 //! serve these files through FUSE.
 
-use ntfs_core::{AttributeBody, Filetime, MftRecordHeader, NtfsFs, Run, StandardInformation};
+use ntfs_core::{
+    Attribute, AttributeBody, Filetime, IndexEntry, IndexRoot, MftRecordHeader, NtfsFs, Run,
+    StandardInformation,
+};
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -37,6 +40,10 @@ pub const ROOT_RECORD: u64 = 5;
 const ATTR_STANDARD_INFORMATION: u32 = 0x10;
 const ATTR_ATTRIBUTE_LIST: u32 = 0x20;
 const ATTR_DATA: u32 = 0x80;
+const ATTR_INDEX_ROOT: u32 = 0x90;
+const ATTR_INDEX_ALLOCATION: u32 = 0xA0;
+/// The name of a directory's file-name index.
+const DIRECTORY_INDEX: &str = "$I30";
 const RECORD_IN_USE: u16 = 0x0001;
 const RECORD_DIRECTORY: u16 = 0x0002;
 /// `$FILE_NAME` flag of a directory (an index is present).
@@ -47,6 +54,8 @@ const NAMESPACE_DOS: u8 = 2;
 const ATTR_ENCRYPTED: u16 = 0x4000;
 /// A compressed stream is decompressed whole: larger ones are refused.
 const MAX_DECOMPRESSED: u64 = 1 << 30;
+/// A directory's index is read whole: a larger `$INDEX_ALLOCATION` is refused.
+const MAX_INDEX_ALLOCATION: u64 = 1 << 30;
 /// File layouts kept for repeated reads of the same files.
 const LAYOUT_CACHE: usize = 4096;
 /// Keep ordinary compressed reads warm without retaining thousands of decompressed files.
@@ -348,16 +357,13 @@ impl Volume {
     /// The entries of directory `record`: long names only (not the DOS 8.3 aliases), without `.`.
     ///
     /// # Errors
-    /// When the record can't be read or isn't a directory.
+    /// When the record can't be read, isn't a directory, or its index can't be read whole.
     pub fn list(&self, record: u64) -> io::Result<Arc<Vec<Entry>>> {
         if let Some(entries) = lock(&self.directories)?.get(&record) {
             return Ok(entries.clone());
         }
-        let bytes = self.fs.read_record(record).map_err(other)?;
         let mut entries: Vec<Entry> = self
-            .fs
-            .directory_entries(&bytes)
-            .map_err(other)?
+            .index_entries(record)?
             .into_iter()
             .filter_map(|entry| {
                 let name = entry.file_name?;
@@ -373,6 +379,126 @@ impl Volume {
         entries.dedup_by(|a, b| a.name == b.name);
         let entries = Arc::new(entries);
         lock(&self.directories)?.insert(record, entries.clone());
+        Ok(entries)
+    }
+
+    /// The entries of directory `record`'s file-name index: those of its `$INDEX_ROOT` and, when
+    /// the root says the index is larger, those of every INDX record of its `$INDEX_ALLOCATION`.
+    ///
+    /// The `$INDEX_ALLOCATION` of a large or often changed directory can be in other MFT records
+    /// than its base record (extension records its `$ATTRIBUTE_LIST` names), in one or more pieces:
+    /// they are put together in VCN order. ntfs-core's `NtfsFs::directory_entries` reads only the
+    /// base record, so such a directory listed only its root's few entries (Juntei #160). An index
+    /// that can't be read whole is an error, not a shorter listing.
+    fn index_entries(&self, record: u64) -> io::Result<Vec<IndexEntry>> {
+        let records = self.records(record)?;
+        let mut roots = Vec::new();
+        let mut pieces = Vec::new();
+        for (at, bytes) in records.iter().enumerate() {
+            let header = MftRecordHeader::parse(bytes).map_err(other)?;
+            let attributes =
+                ntfs_core::parse_attributes(bytes, usize::from(header.first_attribute_offset))
+                    .map_err(other)?;
+            for attribute in attributes {
+                match attribute.type_code {
+                    ATTR_INDEX_ROOT => roots.push((at, attribute)),
+                    ATTR_INDEX_ALLOCATION => pieces.push((at, attribute)),
+                    _ => {}
+                }
+            }
+        }
+        // the file-name index ($I30), or a metadata file's index when the record has no other
+        let Some((at, root)) = roots
+            .iter()
+            .find(|(_, a)| a.name.as_deref() == Some(DIRECTORY_INDEX))
+            .or_else(|| roots.first())
+        else {
+            return Err(io::Error::other(format!(
+                "record {record} is not a directory: it has no $INDEX_ROOT"
+            )));
+        };
+        let content = root
+            .resident_content(&records[*at])
+            .ok_or_else(|| io::Error::other("$INDEX_ROOT content out of bounds"))?;
+        let index = IndexRoot::parse(content).map_err(other)?;
+        let mut entries: Vec<IndexEntry> = index
+            .entries
+            .into_iter()
+            .filter(|e| e.file_name.is_some())
+            .collect();
+        if !index.is_large {
+            return Ok(entries);
+        }
+        let mut pieces: Vec<(u64, u64, usize, &Attribute)> = pieces
+            .iter()
+            .filter(|(_, a)| a.name == root.name)
+            .map(|(at, a)| match a.body {
+                AttributeBody::NonResident {
+                    start_vcn,
+                    last_vcn,
+                    ..
+                } => Ok((start_vcn, last_vcn, *at, a)),
+                AttributeBody::Resident { .. } => Err(io::Error::other(format!(
+                    "the $INDEX_ALLOCATION of directory record {record} is resident"
+                ))),
+            })
+            .collect::<io::Result<_>>()?;
+        if pieces.is_empty() {
+            return Err(io::Error::other(format!(
+                "the index of directory record {record} has no $INDEX_ALLOCATION"
+            )));
+        }
+        pieces.sort_by_key(|(start, ..)| *start);
+        let mut runs = Vec::new();
+        let mut size = 0;
+        let mut next = 0u64;
+        for (start, last, at, attribute) in &pieces {
+            if *start != next || last < start {
+                return Err(io::Error::other(format!(
+                    "the $INDEX_ALLOCATION of directory record {record} is incomplete: a piece covers VCNs {start}-{last}, the next should start at {next}"
+                )));
+            }
+            if let AttributeBody::NonResident { real_size, .. } = attribute.body
+                && *start == 0
+            {
+                size = real_size;
+            }
+            runs.extend(
+                ntfs_core::data::attribute_runlist(&records[*at], attribute).map_err(other)?,
+            );
+            next = last
+                .checked_add(1)
+                .ok_or_else(|| io::Error::other("VCN overflows"))?;
+        }
+        if size > MAX_INDEX_ALLOCATION {
+            return Err(io::Error::other(format!(
+                "the $INDEX_ALLOCATION of directory record {record} is too large to read ({size} bytes)"
+            )));
+        }
+        let mut data = vec![0; usize::try_from(size).map_err(other)?];
+        read_runs(
+            &mut *lock(&self.data)?,
+            &runs,
+            self.cluster_size,
+            0,
+            &mut data,
+        )?;
+        let boot = self.fs.boot();
+        let block = usize::try_from(boot.index_record_size).map_err(other)?;
+        if block == 0 {
+            return Err(io::Error::other("the boot sector's index record size is 0"));
+        }
+        for buffer in data.chunks_exact_mut(block) {
+            if buffer.starts_with(b"INDX") {
+                let found = ntfs_core::parse_index_buffer(
+                    buffer,
+                    block,
+                    usize::from(boot.bytes_per_sector),
+                )
+                .map_err(other)?;
+                entries.extend(found.into_iter().filter(|e| e.file_name.is_some()));
+            }
+        }
         Ok(entries)
     }
 
@@ -1118,6 +1244,214 @@ mod tests {
         assert!(volume.lookup(data, "SMALL.TXT").unwrap().is_none());
         assert!(volume.lookup(ROOT_RECORD, "C").unwrap().unwrap().directory);
         assert!(volume.stat(small).unwrap().modified.0 > 0);
+    }
+
+    /// `bytes` (an MFT record read with its fixups applied) as written on disk: each sector's
+    /// last two bytes saved in the update sequence array and replaced by the sequence number.
+    fn with_fixups(mut bytes: Vec<u8>, sector: usize) -> Vec<u8> {
+        let header = MftRecordHeader::parse(&bytes).unwrap();
+        let usa = usize::from(header.usa_offset);
+        let number = [bytes[usa], bytes[usa + 1]];
+        for i in 1..usize::from(header.usa_count) {
+            let end = i * sector;
+            let saved = [bytes[end - 2], bytes[end - 1]];
+            bytes[usa + 2 * i..usa + 2 * i + 2].copy_from_slice(&saved);
+            bytes[end - 2..end].copy_from_slice(&number);
+        }
+        bytes
+    }
+
+    /// Where MFT record `record` is in the image.
+    fn record_offset(volume: &Volume, record: u64) -> u64 {
+        let size = volume.fs.boot().mft_record_size;
+        let mut at = record * size;
+        for run in volume.fs.runs_by_record(0, None).unwrap() {
+            let len = run.length * volume.cluster_size;
+            if at < len {
+                return volume.start + run.lcn.unwrap() * volume.cluster_size + at;
+            }
+            at -= len;
+        }
+        panic!("record {record} is past the $MFT");
+    }
+
+    /// A copy of the fixture in which directory `path`'s `$INDEX_ALLOCATION` is in an extension
+    /// record, as Windows stores the index of a large or often changed directory: the base record
+    /// keeps its other attributes and gains an `$ATTRIBUTE_LIST` naming the extension record (the
+    /// first unused record), which holds the moved attribute. Returns the directory's record,
+    /// the names it lists in the original, and the extension record's number and new bytes.
+    fn directory_with_extension_record(
+        path: &Path,
+        directory: &str,
+    ) -> (u64, Vec<String>, u64, Vec<u8>) {
+        let image = Image::open(path).unwrap();
+        let volume = &image.volumes[0];
+        let record = record_of(volume, directory);
+        let names: Vec<String> = volume
+            .list(record)
+            .unwrap()
+            .iter()
+            .map(|e| e.name.clone())
+            .collect();
+        let sector = usize::from(volume.fs.boot().bytes_per_sector);
+        let base = volume.fs.read_record(record).unwrap();
+        let header = MftRecordHeader::parse(&base).unwrap();
+        let first = usize::from(header.first_attribute_offset);
+        let attributes = ntfs_core::parse_attributes(&base, first).unwrap();
+        let moved = attributes
+            .iter()
+            .find(|a| a.type_code == ATTR_INDEX_ALLOCATION)
+            .expect("the fixture directory has an $INDEX_ALLOCATION in its base record");
+        let extension = (16..64)
+            .find(|&n| {
+                volume.fs.read_record(n).is_ok_and(|bytes| {
+                    MftRecordHeader::parse(&bytes).is_ok_and(|h| h.flags & RECORD_IN_USE == 0)
+                })
+            })
+            .unwrap();
+        let reference = |n: u64, bytes: &[u8]| {
+            n | u64::from(MftRecordHeader::parse(bytes).unwrap().sequence_number) << 48
+        };
+        let old_extension = volume.fs.read_record(extension).unwrap();
+
+        // the extension record: the moved attribute, its base record named
+        let mut ext = old_extension.clone();
+        let ext_first = usize::from(MftRecordHeader::parse(&ext).unwrap().first_attribute_offset);
+        let attribute = &base[moved.offset..moved.offset + moved.length as usize];
+        ext[ext_first..ext_first + attribute.len()].copy_from_slice(attribute);
+        let end = ext_first + attribute.len();
+        ext[end..end + 8].copy_from_slice(&[0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0]);
+        ext[0x16..0x18].copy_from_slice(&RECORD_IN_USE.to_le_bytes());
+        ext[0x18..0x1C].copy_from_slice(&((end + 8) as u32).to_le_bytes());
+        ext[0x20..0x28].copy_from_slice(&reference(record, &base).to_le_bytes());
+        ext[0x28..0x2A].copy_from_slice(&(moved.attribute_id + 1).to_le_bytes());
+
+        // the base record's attribute list: every attribute, the moved one in the extension
+        let mut list = Vec::new();
+        for a in &attributes {
+            let name: Vec<u8> = a
+                .name
+                .iter()
+                .flat_map(|n| n.encode_utf16().flat_map(u16::to_le_bytes))
+                .collect();
+            let length = (0x1A + name.len() + 7) & !7;
+            let (holder, start_vcn) = match a.body {
+                AttributeBody::NonResident { start_vcn, .. }
+                    if a.type_code == ATTR_INDEX_ALLOCATION =>
+                {
+                    (reference(extension, &old_extension), start_vcn)
+                }
+                AttributeBody::NonResident { start_vcn, .. } => {
+                    (reference(record, &base), start_vcn)
+                }
+                AttributeBody::Resident { .. } => (reference(record, &base), 0),
+            };
+            let mut entry = vec![0u8; length];
+            entry[0..4].copy_from_slice(&a.type_code.to_le_bytes());
+            entry[4..6].copy_from_slice(&(length as u16).to_le_bytes());
+            entry[6] = (name.len() / 2) as u8;
+            entry[7] = 0x1A;
+            entry[8..16].copy_from_slice(&start_vcn.to_le_bytes());
+            entry[16..24].copy_from_slice(&holder.to_le_bytes());
+            entry[24..26].copy_from_slice(&a.attribute_id.to_le_bytes());
+            entry[0x1A..0x1A + name.len()].copy_from_slice(&name);
+            list.extend(entry);
+        }
+        let mut list_attribute = vec![0u8; (0x18 + list.len() + 7) & !7];
+        let length = list_attribute.len() as u32;
+        list_attribute[0..4].copy_from_slice(&ATTR_ATTRIBUTE_LIST.to_le_bytes());
+        list_attribute[4..8].copy_from_slice(&length.to_le_bytes());
+        list_attribute[0x0A..0x0C].copy_from_slice(&0x18u16.to_le_bytes());
+        list_attribute[0x0E..0x10].copy_from_slice(&header.next_attr_id.to_le_bytes());
+        list_attribute[0x10..0x14].copy_from_slice(&(list.len() as u32).to_le_bytes());
+        list_attribute[0x14..0x16].copy_from_slice(&0x18u16.to_le_bytes());
+        list_attribute[0x18..0x18 + list.len()].copy_from_slice(&list);
+
+        // the base record: its attributes in type order, the list after $STANDARD_INFORMATION
+        let mut body = Vec::new();
+        for a in &attributes {
+            if a.type_code == ATTR_INDEX_ALLOCATION {
+                continue;
+            }
+            body.extend_from_slice(&base[a.offset..a.offset + a.length as usize]);
+            if a.type_code == ATTR_STANDARD_INFORMATION {
+                body.extend_from_slice(&list_attribute);
+            }
+        }
+        body.extend([0xFF, 0xFF, 0xFF, 0xFF, 0, 0, 0, 0]);
+        let mut new_base = base.clone();
+        assert!(first + body.len() <= header.allocated_size as usize);
+        new_base[first..].fill(0);
+        new_base[first..first + body.len()].copy_from_slice(&body);
+        new_base[0x18..0x1C].copy_from_slice(&((first + body.len()) as u32).to_le_bytes());
+        new_base[0x28..0x2A].copy_from_slice(&(header.next_attr_id + 1).to_le_bytes());
+
+        let (base_at, ext_at) = (
+            record_offset(volume, record),
+            record_offset(volume, extension),
+        );
+        drop(image);
+        patch_sample(path, base_at, &with_fixups(new_base, sector));
+        patch_sample(path, ext_at, &with_fixups(ext.clone(), sector));
+        (record, names, extension, ext)
+    }
+
+    #[test]
+    fn a_directory_index_in_an_extension_record_is_listed_whole() {
+        let (_dir, path) = kape_sample();
+        let (record, want, _, _) = directory_with_extension_record(&path, "C/Users/sample/Data");
+        let image = Image::open(&path).unwrap();
+        let volume = &image.volumes[0];
+        let records = volume.records(record).unwrap();
+        assert_eq!(records.len(), 2, "the base and the extension record");
+        // reading the base record alone, as ntfs-core does, leaves out the allocation's entries
+        let base_only = volume
+            .fs
+            .directory_entries(&records[0])
+            .unwrap()
+            .iter()
+            .filter(|e| {
+                e.file_name
+                    .as_ref()
+                    .is_some_and(|n| n.namespace != NAMESPACE_DOS)
+            })
+            .count();
+        assert!(base_only < want.len(), "{base_only} of {}", want.len());
+        let got: Vec<String> = volume
+            .list(record)
+            .unwrap()
+            .iter()
+            .map(|e| e.name.clone())
+            .collect();
+        assert_eq!(got, want);
+        // what the moved index names can be opened and read
+        let small = record_of(volume, "C/Users/sample/Data/small.txt");
+        assert_eq!(volume.read(small, 0, 100).unwrap(), b"resident content\n");
+        let mut files_got = Vec::new();
+        files(volume, record, "", 4096, &mut files_got);
+        assert_eq!(files_got.len(), 7);
+    }
+
+    #[test]
+    fn a_directory_index_that_cannot_be_read_whole_is_an_error() {
+        let (_dir, path) = kape_sample();
+        let (record, _, extension, mut ext) =
+            directory_with_extension_record(&path, "C/Users/sample/Data");
+        let image = Image::open(&path).unwrap();
+        let volume = &image.volumes[0];
+        let sector = usize::from(volume.fs.boot().bytes_per_sector);
+        let at = record_offset(volume, extension);
+        drop(image);
+        // the extension record no longer holds the $INDEX_ALLOCATION its base record names
+        let first = usize::from(MftRecordHeader::parse(&ext).unwrap().first_attribute_offset);
+        ext[first..first + 4].copy_from_slice(&0xA8u32.to_le_bytes());
+        patch_sample(&path, at, &with_fixups(ext, sector));
+        let image = Image::open(&path).unwrap();
+        let error = image.volumes[0].list(record).unwrap_err();
+        assert!(
+            error.to_string().contains("has no $INDEX_ALLOCATION"),
+            "{error}"
+        );
     }
 
     #[test]
