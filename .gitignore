@@ -1,2 +1,5 @@
 /target/
 **/__pycache__/
+
+# Local environment files may contain secrets.
+.env
