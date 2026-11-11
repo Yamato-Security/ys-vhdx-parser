@@ -972,12 +972,12 @@ mod tests {
         assert!(read_runs(&mut io::Cursor::new(&volume), &runs, 4, 14, &mut out).is_err());
     }
 
-    /// The sample KAPE VHDX, decompressed into a new directory.
-    fn kape_sample() -> (tempfile::TempDir, std::path::PathBuf) {
+    /// The sample VHDX, decompressed into a new directory.
+    fn sample() -> (tempfile::TempDir, std::path::PathBuf) {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("kape-sample.vhdx");
+        let path = dir.path().join("sample.vhdx");
         let gz = std::fs::File::open(
-            Path::new(env!("CARGO_MANIFEST_DIR")).join("test_files/vhdx/kape-sample.vhdx.gz"),
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("test_files/vhdx/sample.vhdx.gz"),
         )
         .unwrap();
         let mut out = std::fs::File::create(&path).unwrap();
@@ -986,7 +986,7 @@ mod tests {
     }
 
     /// Change logical bytes in a private copy of the bundled fixture. Its BAT is at 3 MiB
-    /// and its fully present payload blocks are 1 MiB (see make_kape_sample.py).
+    /// and its fully present payload blocks are 1 MiB (see make_sample.py).
     fn patch_sample(path: &Path, offset: u64, replacement: &[u8]) {
         use std::io::Write;
         let mut file = std::fs::OpenOptions::new()
@@ -1008,7 +1008,7 @@ mod tests {
 
     #[test]
     fn compressed_file_metadata_survives_damaged_content() {
-        let (_dir, path) = kape_sample();
+        let (_dir, path) = sample();
         let image = Image::open(&path).unwrap();
         let volume = &image.volumes[0];
         let record = record_of(volume, "C/Users/sample/Data/compressed/text.log");
@@ -1027,7 +1027,7 @@ mod tests {
 
     #[test]
     fn a_damaged_ntfs_partition_is_reported_without_hiding_the_readable_volume() {
-        let (_dir, path) = kape_sample();
+        let (_dir, path) = sample();
         // Add an NTFS-looking but unreadable second partition. Sector 64 is in the
         // fixture's unused boot-loader area, so the original NTFS volume stays readable.
         let mut entry = [0; 16];
@@ -1140,8 +1140,8 @@ mod tests {
     }
 
     #[test]
-    fn the_files_of_a_kape_vhdx() {
-        let (_dir, path) = kape_sample();
+    fn the_files_of_a_sample_vhdx() {
+        let (_dir, path) = sample();
         // the boot sector has no jump instruction and no 55 AA signature, as DiscUtils writes it
         let raw = std::fs::read(&path).unwrap();
         assert!(raw.windows(8).any(|w| w == b"NTFS    "));
@@ -1398,7 +1398,7 @@ mod tests {
 
     #[test]
     fn a_directory_index_in_an_extension_record_is_listed_whole() {
-        let (_dir, path) = kape_sample();
+        let (_dir, path) = sample();
         let (record, want, _, _) = directory_with_extension_record(&path, "C/Users/sample/Data");
         let image = Image::open(&path).unwrap();
         let volume = &image.volumes[0];
@@ -1434,7 +1434,7 @@ mod tests {
 
     #[test]
     fn a_directory_index_that_cannot_be_read_whole_is_an_error() {
-        let (_dir, path) = kape_sample();
+        let (_dir, path) = sample();
         let (record, _, extension, mut ext) =
             directory_with_extension_record(&path, "C/Users/sample/Data");
         let image = Image::open(&path).unwrap();

@@ -14,7 +14,7 @@ requires Rust 1.88 or newer.
 The reader is based on Security Ronin's `vhdx-core` 0.4.1, at commit
 `40358d3153c121dcea986a125fa6a8f88853bc1e`, retaining its regression tests and
 attribution. The mounting layer is moved from Juntei PR #135, including its regression
-fixes and public KAPE-layout fixture. See [NOTICE](NOTICE) for attribution and the
+fixes and public triage-layout fixture. See [NOTICE](NOTICE) for attribution and the
 component licenses.
 
 ## VHDX reader
@@ -114,6 +114,6 @@ cargo fmt --all -- --check
 Reader tests include public dynamic, fixed and differencing images, synthetic log
 replay and malformed-input tests. Optional external-corpus/QEMU tests retain their
 original availability gates. Mount tests include known SHA-256 checks for the
-KAPE-layout files, sparse/fragmented/compressed data, malformed partition tables,
+triage-layout files, sparse/fragmented/compressed data, malformed partition tables,
 partial volumes and FILETIME precision. Linux CI requires the live FUSE test;
 Juntei also tests its CLI, automatic parsing and interrupt cleanup against this SDK.

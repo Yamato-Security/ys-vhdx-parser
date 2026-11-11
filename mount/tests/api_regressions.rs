@@ -65,7 +65,7 @@ fn raw_disk_mount_has_a_working_unmount_handle() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("fixture.vhdx");
     let fixture = fs::File::open(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("test_files/vhdx/kape-sample.vhdx.gz"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test_files/vhdx/sample.vhdx.gz"),
     )
     .unwrap();
     std::io::copy(
