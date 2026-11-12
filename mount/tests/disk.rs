@@ -28,7 +28,7 @@ use ys_vhdx_mount::image::{Image, ROOT_RECORD, Volume};
 fn sample(directory: &Path) -> PathBuf {
     let image = directory.join("sample.vhdx");
     let fixture = fs::File::open(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("test_files/vhdx/kape-sample.vhdx.gz"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test_files/vhdx/sample.vhdx.gz"),
     )
     .unwrap();
     std::io::copy(

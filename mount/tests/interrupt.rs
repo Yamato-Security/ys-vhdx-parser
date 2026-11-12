@@ -45,7 +45,7 @@ fn available() -> bool {
 fn fixture(directory: &Path) -> PathBuf {
     let image = directory.join("fixture.vhdx");
     let file = fs::File::open(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("test_files/vhdx/kape-sample.vhdx.gz"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("test_files/vhdx/sample.vhdx.gz"),
     )
     .unwrap();
     std::io::copy(
