@@ -14,7 +14,7 @@ publish = false
 vhdx = { package = "ys-vhdx-parser", version = "1.0.0", path = "../core" }
 ntfs-core = "0.9.8"
 [target.'cfg(target_os = "linux")'.dependencies]
-fuser = "0.18"
+fuser = "0.18.0"
 ctrlc = { version = "3.5.2", features = ["termination"] }
 
 [dev-dependencies]

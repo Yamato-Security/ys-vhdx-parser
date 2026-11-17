@@ -117,3 +117,14 @@ original availability gates. Mount tests include known SHA-256 checks for the
 triage-layout files, sparse/fragmented/compressed data, malformed partition tables,
 partial volumes and FILETIME precision. Linux CI requires the live FUSE test;
 Juntei also tests its CLI, automatic parsing and interrupt cleanup against this SDK.
+
+## Contributing
+
+Contributions require this repository's [Contributor License Agreement](CLA.md).
+It permits **Zachary Mathis** and **Shirofune Security Co., Ltd.** to use and
+sell covered contributions in proprietary editions, while accepted contributions
+also remain available in the free, open-source community edition.
+Read [how to sign](CONTRIBUTING.md#how-to-sign). The `cla/required` check uses
+the [maintainer-verified signer registry](.github/cla/signatures.json); first-time
+signatures require verification and registration.
+
